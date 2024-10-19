@@ -10,6 +10,7 @@ Welcome to **Java-Projects**, your friendly initiation into the world of open-so
 | Project Title | Contributor Names | Pull Requests | Demo |
 | --- | --- | --- | --- |
 | {init} | [iamwatchdogs](https://github.com/iamwatchdogs "goto iamwatchdogs profile") | [#1](https://github.com/Grow-with-Open-Source/Java-Projects/pull/1 "visit pr \#1") | [/Grow-with-Open-Source/Java-Projects/](https://github.com/Grow-with-Open-Source/Java-Projects "view the result of {init}") |
+| {others} | [iamwatchdogs](https://github.com/iamwatchdogs "goto iamwatchdogs profile") | [#5](https://github.com/Grow-with-Open-Source/Java-Projects/pull/5 "visit pr \#5") | [/Grow-with-Open-Source/Java-Projects/.github](https://github.com/Grow-with-Open-Source/Java-Projects/tree/main/.github "view the result of {others}") |
 <!-- TABLE ENDS -->
 
 </div>

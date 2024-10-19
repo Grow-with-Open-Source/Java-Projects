@@ -7,5 +7,14 @@
       "1"
     ],
     "demo-path": "https://github.com/Grow-with-Open-Source/Java-Projects"
+  },
+  "{others}": {
+    "contributor-name": [
+      "iamwatchdogs"
+    ],
+    "pull-request-number": [
+      "5"
+    ],
+    "demo-path": "https://github.com/Grow-with-Open-Source/Java-Projects/tree/main/.github"
   }
 }
