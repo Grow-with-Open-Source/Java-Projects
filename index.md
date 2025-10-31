@@ -11,6 +11,7 @@ Welcome to **Java-Projects**, your friendly initiation into the world of open-so
 | --- | --- | --- | --- |
 | {init} | [iamwatchdogs](https://github.com/iamwatchdogs "goto iamwatchdogs profile") | [#1](https://github.com/Grow-with-Open-Source/Java-Projects/pull/1 "visit pr \#1") | [/Grow-with-Open-Source/Java-Projects/](https://github.com/Grow-with-Open-Source/Java-Projects "view the result of {init}") |
 | {others} | [iamwatchdogs](https://github.com/iamwatchdogs "goto iamwatchdogs profile") | [#5](https://github.com/Grow-with-Open-Source/Java-Projects/pull/5 "visit pr \#5") | [/Grow-with-Open-Source/Java-Projects/.github](https://github.com/Grow-with-Open-Source/Java-Projects/tree/main/.github "view the result of {others}") |
+| {workflows} | [iamwatchdogs](https://github.com/iamwatchdogs "goto iamwatchdogs profile") | [#8](https://github.com/Grow-with-Open-Source/Java-Projects/pull/8 "visit pr \#8") | [/Grow-with-Open-Source/Java-Projects/.github/workflows](https://github.com/Grow-with-Open-Source/Java-Projects/tree/main/.github/workflows "view the result of {workflows}") |
 <!-- TABLE ENDS -->
 
 </div>
