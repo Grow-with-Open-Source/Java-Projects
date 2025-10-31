@@ -2,60 +2,458 @@ name: java-linter
 
 on:
   pull_request:
-    branches: [main]
-    paths: ['**.java']
-  workflow_call:
-    
-jobs:
-  java-linter:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4.1.0
-      - name: Run check style
-        uses: nikitasavinov/checkstyle-action@0.6.0
-        with:
-          level: warning
-          fail_on_error: true
+    branches: [ main ]
+    paths:
+      - '**.java'
 
-  need-help:
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  java-lint-and-review:
     runs-on: ubuntu-latest
-    needs: [java-linter]
-    if: ${{ failure() }}
+    
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4.1.0
-      - name: Setting up python
-        uses: actions/setup-python@v4.7.1
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
-           python-version: '3.12'
-      - name: Install Clang
-        uses: egor-tensin/setup-clang@v1
-      - name: Getting PR details
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch PR base branch
+        if: github.event_name == 'pull_request'
         run: |
-          touch pr.json                                 # creating empty file for paths
-          gh pr view $PR_NUMBER --json files > pr.json  # storing file paths
-          touch res                                     # creating empty file for final output
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Python script for clang diff
-        uses: jannekem/run-python-script-action@v1
+          git fetch origin ${{ github.event.pull_request.base.ref }}:refs/remotes/origin/${{ github.event.pull_request.base.ref }}
+
+      - name: Detect build tool
+        id: detect-build
+        run: |
+          if [ -f "pom.xml" ]; then
+            echo "build_tool=maven" >> $GITHUB_OUTPUT
+            echo "Build tool: Maven"
+          elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+            echo "build_tool=gradle" >> $GITHUB_OUTPUT
+            echo "Build tool: Gradle"
+          else
+            echo "build_tool=none" >> $GITHUB_OUTPUT
+            echo "No build tool detected"
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
         with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: ${{ steps.detect-build.outputs.build_tool != 'none' && steps.detect-build.outputs.build_tool || '' }}
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        if: steps.detect-build.outputs.build_tool != 'none'
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-${{ steps.detect-build.outputs.build_tool }}-${{ hashFiles('**/pom.xml', '**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ steps.detect-build.outputs.build_tool }}-
+
+      - name: Install Checkstyle
+        run: |
+          mkdir -p $HOME/tools
+          cd $HOME/tools
+          wget https://github.com/checkstyle/checkstyle/releases/download/checkstyle-10.12.5/checkstyle-10.12.5-all.jar
+          echo "CHECKSTYLE_JAR=$HOME/tools/checkstyle-10.12.5-all.jar" >> $GITHUB_ENV
+
+      - name: Download Google Java Format
+        run: |
+          cd $HOME/tools
+          wget https://github.com/google/google-java-format/releases/download/v1.19.1/google-java-format-1.19.1-all-deps.jar
+          echo "FORMATTER_JAR=$HOME/tools/google-java-format-1.19.1-all-deps.jar" >> $GITHUB_ENV
+
+      - name: Create Checkstyle Configuration
+        run: |
+          cat > checkstyle.xml << 'EOF'
+          <?xml version="1.0"?>
+          <!DOCTYPE module PUBLIC
+            "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+            "https://checkstyle.org/dtds/configuration_1_3.dtd">
+          <module name="Checker">
+            <property name="charset" value="UTF-8"/>
+            <property name="severity" value="warning"/>
+            <property name="fileExtensions" value="java"/>
+            
+            <!-- Line length check - must be under Checker -->
+            <module name="LineLength">
+              <property name="max" value="120"/>
+              <property name="ignorePattern" value="^package.*|^import.*|a href|href|http://|https://|ftp://"/>
+            </module>
+            
+            <module name="TreeWalker">
+              <module name="OuterTypeFilename"/>
+              <module name="IllegalTokenText">
+                <property name="tokens" value="STRING_LITERAL, CHAR_LITERAL"/>
+                <property name="format" value="\\u00(09|0(a|A)|0(c|C)|0(d|D)|22|27|5(C|c))|\\(0(10|11|12|14|15|42|47)|134)"/>
+              </module>
+              <module name="AvoidEscapedUnicodeCharacters">
+                <property name="allowEscapesForControlCharacters" value="true"/>
+                <property name="allowByTailComment" value="true"/>
+                <property name="allowNonPrintableEscapes" value="true"/>
+              </module>
+              <module name="AvoidStarImport"/>
+              <module name="OneTopLevelClass"/>
+              <module name="NoLineWrap"/>
+              <module name="EmptyBlock">
+                <property name="option" value="TEXT"/>
+                <property name="tokens" value="LITERAL_TRY, LITERAL_FINALLY, LITERAL_IF, LITERAL_ELSE, LITERAL_SWITCH"/>
+              </module>
+              <module name="NeedBraces"/>
+              <module name="LeftCurly"/>
+              <module name="RightCurly">
+                <property name="option" value="alone"/>
+                <property name="tokens" value="CLASS_DEF, METHOD_DEF, CTOR_DEF, LITERAL_FOR, LITERAL_WHILE, STATIC_INIT, INSTANCE_INIT"/>
+              </module>
+              <module name="WhitespaceAround">
+                <property name="allowEmptyConstructors" value="true"/>
+                <property name="allowEmptyMethods" value="true"/>
+                <property name="allowEmptyTypes" value="true"/>
+                <property name="allowEmptyLoops" value="true"/>
+              </module>
+              <module name="OneStatementPerLine"/>
+              <module name="MultipleVariableDeclarations"/>
+              <module name="ArrayTypeStyle"/>
+              <module name="MissingSwitchDefault"/>
+              <module name="FallThrough"/>
+              <module name="UpperEll"/>
+              <module name="ModifierOrder"/>
+              <module name="EmptyLineSeparator">
+                <property name="allowNoEmptyLineBetweenFields" value="true"/>
+              </module>
+              <module name="SeparatorWrap">
+                <property name="tokens" value="DOT"/>
+                <property name="option" value="nl"/>
+              </module>
+              <module name="SeparatorWrap">
+                <property name="tokens" value="COMMA"/>
+                <property name="option" value="EOL"/>
+              </module>
+              <module name="PackageName">
+                <property name="format" value="^[a-z]+(\.[a-z][a-z0-9]*)*$"/>
+              </module>
+              <module name="TypeName"/>
+              <module name="MemberName">
+                <property name="format" value="^[a-z][a-z0-9][a-zA-Z0-9]*$"/>
+              </module>
+              <module name="ParameterName">
+                <property name="format" value="^[a-z]([a-z0-9][a-zA-Z0-9]*)?$"/>
+              </module>
+              <module name="CatchParameterName">
+                <property name="format" value="^[a-z]([a-z0-9][a-zA-Z0-9]*)?$"/>
+              </module>
+              <module name="LocalVariableName">
+                <property name="tokens" value="VARIABLE_DEF"/>
+                <property name="format" value="^[a-z]([a-z0-9][a-zA-Z0-9]*)?$"/>
+              </module>
+              <module name="ClassTypeParameterName">
+                <property name="format" value="(^[A-Z][0-9]?)$|([A-Z][a-zA-Z0-9]*[T]$)"/>
+              </module>
+              <module name="MethodTypeParameterName">
+                <property name="format" value="(^[A-Z][0-9]?)$|([A-Z][a-zA-Z0-9]*[T]$)"/>
+              </module>
+              <module name="InterfaceTypeParameterName">
+                <property name="format" value="(^[A-Z][0-9]?)$|([A-Z][a-zA-Z0-9]*[T]$)"/>
+              </module>
+              <module name="NoFinalizer"/>
+              <module name="GenericWhitespace"/>
+              <module name="Indentation">
+                <property name="basicOffset" value="2"/>
+                <property name="braceAdjustment" value="0"/>
+                <property name="caseIndent" value="2"/>
+                <property name="throwsIndent" value="4"/>
+                <property name="lineWrappingIndentation" value="4"/>
+                <property name="arrayInitIndent" value="2"/>
+              </module>
+              <module name="AbbreviationAsWordInName">
+                <property name="ignoreFinal" value="false"/>
+                <property name="allowedAbbreviationLength" value="1"/>
+              </module>
+              <module name="OverloadMethodsDeclarationOrder"/>
+              <module name="VariableDeclarationUsageDistance"/>
+              <module name="MethodParamPad"/>
+              <module name="NoWhitespaceBefore">
+                <property name="tokens" value="COMMA, SEMI, POST_INC, POST_DEC, DOT, ELLIPSIS, METHOD_REF"/>
+                <property name="allowLineBreaks" value="true"/>
+              </module>
+              <module name="ParenPad"/>
+              <module name="OperatorWrap">
+                <property name="option" value="NL"/>
+                <property name="tokens" value="BAND, BOR, BSR, BXOR, DIV, EQUAL, GE, GT, LAND, LE, LITERAL_INSTANCEOF, LOR, LT, MINUS, MOD, NOT_EQUAL, PLUS, QUESTION, SL, SR, STAR, METHOD_REF"/>
+              </module>
+              <module name="AnnotationLocation">
+                <property name="tokens" value="CLASS_DEF, INTERFACE_DEF, ENUM_DEF, METHOD_DEF, CTOR_DEF"/>
+              </module>
+              <module name="AnnotationLocation">
+                <property name="tokens" value="VARIABLE_DEF"/>
+                <property name="allowSamelineMultipleAnnotations" value="true"/>
+              </module>
+              <module name="NonEmptyAtclauseDescription"/>
+              <module name="MethodName">
+                <property name="format" value="^[a-z][a-z0-9][a-zA-Z0-9_]*$"/>
+              </module>
+              <module name="EmptyCatchBlock">
+                <property name="exceptionVariableName" value="expected"/>
+              </module>
+              <module name="CommentsIndentation"/>
+            </module>
+          </module>
+          EOF
+
+      - name: Get changed Java files
+        id: changed-files
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.sha }}"
+            
+            echo "Comparing $BASE_SHA...$HEAD_SHA"
+            
+            MERGE_BASE=$(git merge-base $BASE_SHA $HEAD_SHA)
+            echo "Merge base: $MERGE_BASE"
+            
+            git diff --name-only --diff-filter=ACMRT $MERGE_BASE $HEAD_SHA | grep '\.java$' > changed_files.txt || true
+          else
+            if git rev-parse HEAD^ >/dev/null 2>&1; then
+              git diff --name-only --diff-filter=ACMRT HEAD^ HEAD | grep '\.java$' > changed_files.txt || true
+            else
+              git diff-tree --no-commit-id --name-only --diff-filter=ACMRT -r HEAD | grep '\.java$' > changed_files.txt || true
+            fi
+          fi
+          
+          if [ -s changed_files.txt ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "Changed Java files:"
+            cat changed_files.txt
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No Java files changed"
+          fi
+
+      - name: Run Checkstyle
+        if: steps.changed-files.outputs.has_changes == 'true'
+        run: |
+          mkdir -p reports
+          java -jar $CHECKSTYLE_JAR -c checkstyle.xml $(cat changed_files.txt | tr '\n' ' ') -f xml -o reports/checkstyle-result.xml || true
+          java -jar $CHECKSTYLE_JAR -c checkstyle.xml $(cat changed_files.txt | tr '\n' ' ') || true
+
+      - name: Run SpotBugs
+        if: steps.changed-files.outputs.has_changes == 'true' && steps.detect-build.outputs.build_tool == 'maven'
+        continue-on-error: true
+        run: |
+          mvn clean compile spotbugs:spotbugs || true
+
+      - name: Run SpotBugs (Gradle)
+        if: steps.changed-files.outputs.has_changes == 'true' && steps.detect-build.outputs.build_tool == 'gradle'
+        continue-on-error: true
+        run: |
+          if grep -q "spotbugs" build.gradle* 2>/dev/null; then
+            ./gradlew spotbugsMain || true
+          else
+            echo "SpotBugs not configured in Gradle project"
+          fi
+
+      - name: Format Java files
+        if: steps.changed-files.outputs.has_changes == 'true'
+        run: |
+          mkdir -p formatted
+          while IFS= read -r file; do
+            if [ -f "$file" ]; then
+              echo "Formatting $file..."
+              java -jar $FORMATTER_JAR --replace "$file"
+            fi
+          done < changed_files.txt
+
+      - name: Generate diff and suggestions
+        if: steps.changed-files.outputs.has_changes == 'true'
+        id: generate-diff
+        run: |
+          mkdir -p suggestions
+          
+          cat > suggestions/review.md << 'HEADER'
+          ## 🔍 Java Code Review Results
+          
+          ### Summary
+          This automated review checks your Java code for:
+          - **Style violations** (Checkstyle)
+          - **Code formatting** (Google Java Format)
+          - **Best practices**
+          
+          ---
+          
+          HEADER
+          
+          if git diff --quiet; then
+            echo "no_changes=true" >> $GITHUB_OUTPUT
+            echo "✅ **All files are properly formatted!**" >> suggestions/review.md
+          else
+            echo "no_changes=false" >> $GITHUB_OUTPUT
+            echo "### 📝 Formatting Changes Required" >> suggestions/review.md
+            echo "" >> suggestions/review.md
+            
+            while IFS= read -r file; do
+              if [ -f "$file" ] && ! git diff --quiet "$file"; then
+                echo "#### \`$file\`" >> suggestions/review.md
+                echo "" >> suggestions/review.md
+                echo "<details>" >> suggestions/review.md
+                echo "<summary>View suggested changes</summary>" >> suggestions/review.md
+                echo "" >> suggestions/review.md
+                echo '```diff' >> suggestions/review.md
+                git diff "$file" >> suggestions/review.md
+                echo '```' >> suggestions/review.md
+                echo "" >> suggestions/review.md
+                echo "</details>" >> suggestions/review.md
+                echo "" >> suggestions/review.md
+              fi
+            done < changed_files.txt
+          fi
+          
+          if [ -f "reports/checkstyle-result.xml" ]; then
+            ERROR_COUNT=$(grep -o '<error' reports/checkstyle-result.xml | wc -l)
+            if [ "$ERROR_COUNT" -gt 0 ]; then
+              echo "" >> suggestions/review.md
+              echo "### ⚠️ Checkstyle Issues Found: $ERROR_COUNT" >> suggestions/review.md
+              echo "" >> suggestions/review.md
+              echo "<details>" >> suggestions/review.md
+              echo "<summary>View Checkstyle violations</summary>" >> suggestions/review.md
+              echo "" >> suggestions/review.md
+              java -jar $CHECKSTYLE_JAR -c checkstyle.xml $(cat changed_files.txt | tr '\n' ' ') 2>&1 | head -100 >> suggestions/review.md || true
+              echo "" >> suggestions/review.md
+              echo "</details>" >> suggestions/review.md
+            fi
+          fi
+          
+          cat >> suggestions/review.md << 'FOOTER'
+          
+          ---
+          
+          ### 💡 Recommendations
+          
+          1. **Apply formatting**: Run `google-java-format` on your files
+          2. **Fix Checkstyle issues**: Address the violations mentioned above
+          3. **Review best practices**: Ensure your code follows Java conventions
+          
+          ### 🛠️ How to Fix Locally
+          
+          ```bash
+          # Download Google Java Format
+          wget https://github.com/google/google-java-format/releases/download/v1.19.1/google-java-format-1.19.1-all-deps.jar
+          
+          # Format your Java files
+          java -jar google-java-format-1.19.1-all-deps.jar --replace src/**/*.java
+          ```
+          
+          Or use your IDE plugin:
+          - **IntelliJ IDEA**: Install "google-java-format" plugin
+          - **Eclipse**: Install "google-java-format" plugin
+          - **VS Code**: Install "Language Support for Java" extension
+          
+          FOOTER
+
+      - name: Comment PR with review
+        if: github.event_name == 'pull_request' && steps.changed-files.outputs.has_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            import os
-            import json
-            import sys
-            with open('pr.json','r') as json_file:
-              data = json.load(json_file)
-              for file in data["files"]:
-                path = file["path"]
-                if os.path.exists(path):
-                  os.system('echo "" >> res')
-                  os.system(f'echo "Filename: {path}" >> res')
-                  os.system('echo "" >> res')
-                  os.system(f'clang-format -style=Google {path} >> res')
-                  os.system('echo ---------------------------------------- >> res')
-      - name: Show diffs and exit
+            const fs = require('fs');
+            const reviewContent = fs.readFileSync('suggestions/review.md', 'utf8');
+            
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('🔍 Java Code Review Results')
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: reviewContent
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: reviewContent
+              });
+            }
+
+      - name: Upload formatted files as artifact
+        if: steps.changed-files.outputs.has_changes == 'true' && steps.generate-diff.outputs.no_changes == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: formatted-java-files
+          path: |
+            **/*.java
+          retention-days: 7
+
+      - name: Upload Checkstyle report
+        if: steps.changed-files.outputs.has_changes == 'true' && hashFiles('reports/checkstyle-result.xml') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkstyle-report
+          path: reports/checkstyle-result.xml
+          retention-days: 14
+
+      - name: Create check run
+        if: steps.changed-files.outputs.has_changes == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            let conclusion = 'success';
+            let summary = '✅ All checks passed!';
+            
+            if (fs.existsSync('reports/checkstyle-result.xml')) {
+              const content = fs.readFileSync('reports/checkstyle-result.xml', 'utf8');
+              const errorCount = (content.match(/<error/g) || []).length;
+              
+              if (errorCount > 0) {
+                conclusion = 'failure';
+                summary = `❌ Found ${errorCount} Checkstyle violations`;
+              }
+            }
+            
+            if ('${{ steps.generate-diff.outputs.no_changes }}' === 'false') {
+              conclusion = 'failure';
+              summary += '\n❌ Code formatting issues detected';
+            }
+            
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'Java Lint & Format Check',
+              head_sha: context.sha,
+              status: 'completed',
+              conclusion: conclusion,
+              output: {
+                title: 'Java Code Quality Check',
+                summary: summary
+              }
+            });
+
+      - name: Fail if issues found
+        if: steps.changed-files.outputs.has_changes == 'true' && steps.generate-diff.outputs.no_changes == 'false'
         run: |
-          cat res
+          echo "❌ Code formatting or style issues detected!"
+          echo "Please review the PR comment for detailed suggestions."
+          exit 1
