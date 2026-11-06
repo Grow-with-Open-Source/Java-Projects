@@ -25,5 +25,14 @@
       "8"
     ],
     "demo-path": "https://github.com/Grow-with-Open-Source/Java-Projects/tree/main/.github/workflows"
+  },
+  "bubble-sort": {
+    "contributor-name": [
+      "richarddatko6-dev"
+    ],
+    "pull-request-number": [
+      "11"
+    ],
+    "demo-path": "bubble-sort"
   }
 }
